@@ -2,6 +2,10 @@ import time
 import threading
 from datetime import datetime
 from client import TextNowClient, DIRECTION_OUTGOING, DIRECTION_INCOMING
+from chatgpt import ChatGPTClient
+
+# Initialize ChatGPT client
+chatgpt_client = ChatGPTClient()
 
 def format_message(msg):
     """Format a message for display."""
@@ -21,6 +25,21 @@ def format_message(msg):
     msg_id = msg.get("id", "no_id")
     return f"{direction} [{timestamp}] ({msg_id}): {msg.get('message', '')}"
 
+def handle_command(message):
+    """Handle special commands from phone"""
+    message_lower = message.lower()
+    
+    if message_lower == "/new":
+        return chatgpt_client.new_session()
+    elif message_lower == "/model 4o":
+        return chatgpt_client.set_model("gpt-4o")
+    elif message_lower == "/model o3":
+        return chatgpt_client.set_model("o3-mini")
+    elif message_lower == "/help":
+        return "Commands:\n/new - Start new session\n/model 4o - Switch to GPT-4o\n/model o3 - Switch to o3-mini\n/help - Show commands"
+    
+    return None
+
 def show_conversation_history(client, phone_number):
     """Display recent conversation history."""
     print("\n📜 Recent conversation history:")
@@ -36,19 +55,33 @@ def show_conversation_history(client, phone_number):
 def message_listener(client, phone_number, stop_event):
     """Background thread to check for new messages."""
     print("🔄 Message listener started (polling silently)...")
+    print("🤖 ChatGPT auto-reply enabled!")
     print("Ready to receive messages. Send a text to test!")
     
     while not stop_event.is_set():
         try:
             new_msgs = client.get_new_messages()
             
-            # Show only incoming messages from our conversation
-            # Direction 1 means it's from the contact (incoming to us)
+            # Handle incoming messages and auto-reply
             for msg in new_msgs:
                 if (msg['contact_value'] == phone_number and 
-                    msg['message_direction'] == DIRECTION_OUTGOING):  # 1 means from contact to us
+                    msg['message_direction'] == DIRECTION_OUTGOING):
+                    
+                    incoming_message = msg.get('message', '')
                     print(f"\n{format_message(msg)}")
-                    print("You: ", end='', flush=True)  # Restore input prompt
+                    
+                    # Check for commands first
+                    command_response = handle_command(incoming_message)
+                    if command_response:
+                        response = command_response
+                    else:
+                        # Get ChatGPT response
+                        print("🤖 Getting ChatGPT response...")
+                        response = chatgpt_client.get_response(incoming_message)
+                    
+                    # Send auto-reply
+                    client.send_sms(phone_number, response)
+                    print("You: ", end='', flush=True)
             
             time.sleep(2)  # Poll every 2 seconds
         except Exception as e:
